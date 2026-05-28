@@ -225,6 +225,112 @@ class TraceGraph:
         if self._current_turn:
             self.end_turn("[interrupted]" if interrupted else "[incomplete]")
 
+    # ---- Serialization ----------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the entire trace graph to a JSON-compatible dict."""
+
+        def span_to_dict(s: Span) -> dict:
+            return {
+                "name": s.name,
+                "kind": s.kind,
+                "started_at": s.started_at,
+                "ended_at": s.ended_at,
+                "duration_ms": s.duration_ms,
+                "status": s.status,
+                "metadata": s.metadata,
+                "children": [span_to_dict(c) for c in s.children],
+            }
+
+        return {
+            "session_id": self.session_id,
+            "model": self.model,
+            "platform": self.platform,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "duration_s": round(self.ended_at - self.started_at, 3) if self.ended_at else 0,
+            "turns": [
+                {
+                    "index": t.index,
+                    "user_message": t.user_message[:500],
+                    "assistant_response": t.assistant_response[:500],
+                    "started_at": t.started_at,
+                    "ended_at": t.ended_at,
+                    "duration_s": round(t.ended_at - t.started_at, 3) if t.ended_at else 0,
+                    "spans": [span_to_dict(s) for s in t.spans],
+                    "metadata": t.metadata,
+                }
+                for t in self.turns
+            ],
+            "subagents": [
+                {
+                    "child_session_id": s.child_session_id,
+                    "parent_session_id": s.parent_session_id,
+                    "goal": s.goal,
+                    "status": s.status,
+                    "started_at": s.started_at,
+                    "ended_at": s.ended_at,
+                    "duration_ms": s.duration_ms,
+                    "summary": s.summary[:500] if s.summary else "",
+                }
+                for s in self.subagents
+            ],
+            "metadata": self.metadata,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, default=str)
+
+    def write_json(self, path: Optional[Path] = None) -> Path:
+        """Write the trace as JSON to disk. Returns the output path."""
+        TRACE_DIR.mkdir(parents=True, exist_ok=True)
+        if path is None:
+            path = TRACE_DIR / f"{self.session_id}.json"
+        path.write_text(self.to_json(), encoding="utf-8")
+        logger.info("Trace written to %s", path)
+        return path    def to_text_tree(self) -> str:
+        """Generate a simple text tree of the trace (for /trace command)."""
+        lines = []
+        duration = round(self.ended_at - self.started_at, 1) if self.ended_at else "?"
+        lines.append(f"Trace: {self.session_id}")
+        lines.append(f"├── Model: {self.model} | Platform: {self.platform} | Duration: {duration}s")
+        lines.append(f"├── Turns: {len(self.turns)}")
+        for turn in self.turns:
+            td = round(turn.ended_at - turn.started_at, 1) if turn.ended_at else "?"
+            msg_preview = (turn.user_message or "")[:80]
+            lines.append(f"│   ├── Turn {turn.index} ({td}s)")
+            lines.append(f"│   │   ├── User: {msg_preview}")
+            for j, span in enumerate(turn.spans):
+                is_last_span = j == len(turn.spans) - 1 and not self.subagents
+                prefix = "│   │   └──" if is_last_span else "│   │   ├──"
+                if span.kind == "llm_call":
+                    tokens = span.metadata.get("usage", {})
+                    lines.append(
+                        f"{prefix} LLM #{span.metadata.get('api_call_count','?')} "
+                        f"({span.duration_ms}ms, "
+                        f"in:{tokens.get('input_tokens','?')} out:{tokens.get('output_tokens','?')})"
+                    )
+                elif span.kind == "tool_call":
+                    status = "✓" if span.status == "completed" else "✗"
+                    lines.append(
+                        f"{prefix} {status} {span.name} ({span.duration_ms}ms)"
+                    )
+            resp_preview = (turn.assistant_response or "")[:120]
+            if resp_preview:
+                lines.append(f"│   │   └── Response: {resp_preview}")
+
+        if self.subagents:
+            lines.append(f"├── Subagents: {len(self.subagents)}")
+            for sub in self.subagents:
+                status = "✓" if sub.status == "completed" else "✗"
+                lines.append(
+                    f"│   ├── {status} {sub.child_session_id[:12]}... "
+                    f"({sub.duration_ms}ms)"
+                )
+
+        return "\n".join(lines)
+
+
 
 # Thread-safe registry of active traces by session_id
 _traces: dict[str, TraceGraph] = {}
