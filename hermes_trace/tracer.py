@@ -288,7 +288,84 @@ class TraceGraph:
             path = TRACE_DIR / f"{self.session_id}.json"
         path.write_text(self.to_json(), encoding="utf-8")
         logger.info("Trace written to %s", path)
-        return path    def to_text_tree(self) -> str:
+        return path
+
+    def to_mermaid(self) -> str:
+        """Generate a Mermaid flowchart of the trace."""
+        def _sanitize(text: str) -> str:
+            """Escape text for safe inclusion in Mermaid node labels."""
+            # Replace characters that break Mermaid syntax inside quoted labels
+            return (
+                text.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("[", "&#91;")
+                    .replace("]", "&#93;")
+                    .replace("(", "&#40;")
+                    .replace(")", "&#41;")
+                    .replace("{", "&#123;")
+                    .replace("}", "&#125;")
+                    .replace("<", "&#60;")
+                    .replace(">", "&#62;")
+            )
+
+        lines = ["flowchart TD"]
+        lines.append(f'  session["Session: {_sanitize(self.session_id[:12])}..."]')
+        lines.append(f'  session_info["model: {_sanitize(self.model)}<br/>platform: {_sanitize(self.platform)}"]')
+        lines.append("  session --> session_info")
+
+        for i, turn in enumerate(self.turns):
+            tid = f"T{i}"
+            turn_label = f"Turn {turn.index}"
+            if turn.user_message:
+                turn_label += f"<br/>user: {_sanitize(turn.user_message[:60])}"
+            if turn.assistant_response:
+                turn_label += f"<br/>resp: {_sanitize(turn.assistant_response[:60])}"
+            lines.append(f'  {tid}["{turn_label}"]')
+            lines.append(f"  session --> {tid}")
+
+            # Show spans within the turn
+            for j, span in enumerate(turn.spans):
+                sid = f"{tid}_S{j}"
+                if span.kind == "llm_call":
+                    label = f"LLM #{span.metadata.get('api_call_count','?')}"
+                    label += f"<br/>{span.duration_ms}ms"
+                    label += f"<br/>tokens: {span.metadata.get('usage',{}).get('input_tokens','?')}→{span.metadata.get('usage',{}).get('output_tokens','?')}"
+                    lines.append(f'  {sid}["{label}"]')
+                    lines.append(f"  {tid} --> {sid}")
+                elif span.kind == "tool_call":
+                    status_icon = "&#10003;" if span.status == "completed" else "&#10007;"
+                    label = f"{status_icon} {_sanitize(span.name)}"
+                    label += f"<br/>{span.duration_ms}ms"
+                    args = span.metadata.get("args", {})
+                    if args:
+                        args_str = _sanitize(json.dumps(args)[:80])
+                        label += f"<br/>{args_str}"
+                    lines.append(f'  {sid}["{label}"]')
+                    lines.append(f"  {tid} --> {sid}")
+
+        # Subagents
+        for i, sub in enumerate(self.subagents):
+            sid = f"SUB{i}"
+            status_icon = "&#10003;" if sub.status == "completed" else "&#10007;"
+            label = f"{status_icon} subagent {_sanitize(sub.child_session_id[:12])}..."
+            label += f"<br/>{sub.duration_ms}ms"
+            if sub.goal:
+                label += f"<br/>goal: {_sanitize(sub.goal[:60])}"
+            lines.append(f'  {sid}["{label}"]')
+            lines.append(f"  session --> {sid}")
+
+        return "\n".join(lines)
+
+    def write_mermaid(self, path: Optional[Path] = None) -> Path:
+        """Write the trace as a Mermaid diagram to disk."""
+        TRACE_DIR.mkdir(parents=True, exist_ok=True)
+        if path is None:
+            path = TRACE_DIR / f"{self.session_id}.mmd"
+        path.write_text(self.to_mermaid(), encoding="utf-8")
+        logger.info("Mermaid trace written to %s", path)
+        return path
+
+    def to_text_tree(self) -> str:
         """Generate a simple text tree of the trace (for /trace command)."""
         lines = []
         duration = round(self.ended_at - self.started_at, 1) if self.ended_at else "?"
@@ -331,7 +408,6 @@ class TraceGraph:
         return "\n".join(lines)
 
 
-
 # Thread-safe registry of active traces by session_id
 _traces: dict[str, TraceGraph] = {}
 _lock = threading.RLock()
@@ -366,4 +442,3 @@ def list_traces() -> list[str]:
     """List all active trace session IDs."""
     with _lock:
         return list(_traces.keys())
-
