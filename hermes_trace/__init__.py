@@ -36,6 +36,8 @@ def register(ctx):
     ctx.register_hook("on_session_finalize", _on_session_finalize)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
+    ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
@@ -62,6 +64,8 @@ def register(ctx):
     ctx.register_hook("on_session_finalize", _on_session_finalize)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_llm_call", _on_post_llm_call)
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
+    ctx.register_hook("post_tool_call", _on_post_tool_call)
 
 
 def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **kwargs):
@@ -173,4 +177,54 @@ def _on_api_request_error(session_id: str = "", error: Any = None, **kwargs):
     trace.end_llm_call(
         status="error",
         error=str(error)[:500] if error else "unknown",
+    )
+
+
+def _on_pre_tool_call(
+    tool_name: str = "",
+    args: Optional[dict] = None,
+    task_id: str = "",
+    session_id: str = "",
+    tool_call_id: str = "",
+    **kwargs,
+):
+    trace = get_trace(session_id or task_id)
+    trace.start_tool_call(
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        args=args or {},
+    )
+
+
+def _on_post_tool_call(
+    tool_name: str = "",
+    args: Optional[dict] = None,
+    result: str = "",
+    task_id: str = "",
+    session_id: str = "",
+    tool_call_id: str = "",
+    duration_ms: int = 0,
+    status: str = "",
+    error_type: str = "",
+    error_message: str = "",
+    **kwargs,
+):
+    trace = get_trace(session_id or task_id)
+    # Use the hook-provided status if available; fall back to result inspection
+    if not status and result:
+        try:
+            parsed = json.loads(result) if isinstance(result, str) else result
+            if isinstance(parsed, dict) and "error" in parsed:
+                status = "error"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not status:
+        status = "completed"
+
+    trace.end_tool_call(
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        status=status,
+        result_preview=result[:500] if result else "",
+        duration_ms=duration_ms,
     )
