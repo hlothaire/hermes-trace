@@ -41,14 +41,20 @@ def register(ctx):
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
+    ctx.register_hook("subagent_start", _on_subagent_start)
+    ctx.register_hook("subagent_stop", _on_subagent_stop)
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
+    ctx.register_hook("subagent_start", _on_subagent_start)
+    ctx.register_hook("subagent_stop", _on_subagent_stop)
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
+    ctx.register_hook("subagent_start", _on_subagent_start)
+    ctx.register_hook("subagent_stop", _on_subagent_stop)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
     ctx.register_hook("pre_approval_request", _on_pre_approval_request)
@@ -75,6 +81,8 @@ def register(ctx):
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
+    ctx.register_hook("subagent_start", _on_subagent_start)
+    ctx.register_hook("subagent_stop", _on_subagent_stop)
 
 
 def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **kwargs):
@@ -340,5 +348,35 @@ def _on_post_tool_call(
         tool_call_id=tool_call_id,
         status=status,
         result_preview=result[:500] if result else "",
+        duration_ms=duration_ms,
+    )
+
+
+def _on_subagent_start(
+    session_id: str = "",
+    **kwargs,
+):
+    child_session_id = kwargs.get("child_session_id", kwargs.get("child_task_id", "?"))
+    goal = kwargs.get("child_goal", kwargs.get("task_goal", ""))
+    trace = get_trace(session_id)
+    trace.start_subagent(
+        child_session_id=str(child_session_id),
+        goal=str(goal),
+    )
+
+
+def _on_subagent_stop(
+    parent_session_id: str = "",
+    child_status: str = "completed",
+    child_summary: str = "",
+    duration_ms: int = 0,
+    **kwargs,
+):
+    child_session_id = kwargs.get("child_session_id", kwargs.get("child_task_id", "?"))
+    trace = get_trace(parent_session_id)
+    trace.end_subagent(
+        child_session_id=str(child_session_id),
+        status=child_status,
+        summary=child_summary or "",
         duration_ms=duration_ms,
     )
