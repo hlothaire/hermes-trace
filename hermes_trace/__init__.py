@@ -41,8 +41,14 @@ def register(ctx):
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
+    ctx.register_hook("pre_api_request", _on_pre_api_request)
+    ctx.register_hook("post_api_request", _on_post_api_request)
+    ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("pre_api_request", _on_pre_api_request)
+    ctx.register_hook("post_api_request", _on_post_api_request)
+    ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
     ctx.register_hook("pre_approval_request", _on_pre_approval_request)
@@ -66,6 +72,9 @@ def register(ctx):
     ctx.register_hook("post_llm_call", _on_post_llm_call)
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
+    ctx.register_hook("pre_api_request", _on_pre_api_request)
+    ctx.register_hook("post_api_request", _on_post_api_request)
+    ctx.register_hook("api_request_error", _on_api_request_error)
 
 
 def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **kwargs):
@@ -123,6 +132,111 @@ def _on_post_llm_call(
 ):
     trace = get_trace(session_id)
     trace.end_turn(assistant_response=assistant_response)
+
+
+def _on_pre_api_request(
+    session_id: str = "",
+    api_call_count: int = 0,
+    model: str = "",
+    provider: str = "",
+    base_url: str = "",
+    api_mode: str = "",
+    message_count: int = 0,
+    tool_count: int = 0,
+    approx_input_tokens: int = 0,
+    request_char_count: int = 0,
+    max_tokens: int = 0,
+    **kwargs,
+):
+    trace = get_trace(session_id)
+    trace.start_llm_call(
+        api_call_count=api_call_count,
+        model=model,
+        provider=provider,
+        base_url=base_url,
+        api_mode=api_mode,
+        message_count=message_count,
+        tool_count=tool_count,
+        approx_input_tokens=approx_input_tokens,
+        request_char_count=request_char_count,
+        max_tokens=max_tokens,
+    )
+
+
+def _on_post_api_request(
+    session_id: str = "",
+    usage: Optional[dict] = None,
+    finish_reason: str = "",
+    response_model: str = "",
+    api_duration: float = 0,
+    **kwargs,
+):
+    trace = get_trace(session_id)
+    trace.end_llm_call(
+        status="completed",
+        usage=usage or {},
+        finish_reason=finish_reason,
+        response_model=response_model,
+        api_duration=api_duration,
+    )
+
+
+def _on_api_request_error(session_id: str = "", error: Any = None, **kwargs):
+    trace = get_trace(session_id)
+    trace.end_llm_call(
+        status="error",
+        error=str(error)[:500] if error else "unknown",
+    )
+
+
+def _on_pre_tool_call(
+    tool_name: str = "",
+    args: Optional[dict] = None,
+    task_id: str = "",
+    session_id: str = "",
+    tool_call_id: str = "",
+    **kwargs,
+):
+    trace = get_trace(session_id or task_id)
+    trace.start_tool_call(
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        args=args or {},
+    )
+
+
+def _on_post_tool_call(
+    tool_name: str = "",
+    args: Optional[dict] = None,
+    result: str = "",
+    task_id: str = "",
+    session_id: str = "",
+    tool_call_id: str = "",
+    duration_ms: int = 0,
+    status: str = "",
+    error_type: str = "",
+    error_message: str = "",
+    **kwargs,
+):
+    trace = get_trace(session_id or task_id)
+    # Use the hook-provided status if available; fall back to result inspection
+    if not status and result:
+        try:
+            parsed = json.loads(result) if isinstance(result, str) else result
+            if isinstance(parsed, dict) and "error" in parsed:
+                status = "error"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not status:
+        status = "completed"
+
+    trace.end_tool_call(
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        status=status,
+        result_preview=result[:500] if result else "",
+        duration_ms=duration_ms,
+    )
 
 
 def _on_pre_api_request(
