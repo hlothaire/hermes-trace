@@ -43,11 +43,23 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+
+    ctx.register_command(
+        "trace",
+        handler=_handle_trace_command,
+        description="Show the current session's execution trace graph",
+    )
     ctx.register_hook("pre_api_request", _on_pre_api_request)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+
+    ctx.register_command(
+        "trace",
+        handler=_handle_trace_command,
+        description="Show the current session's execution trace graph",
+    )
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("pre_api_request", _on_pre_api_request)
@@ -55,8 +67,20 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+
+    ctx.register_command(
+        "trace",
+        handler=_handle_trace_command,
+        description="Show the current session's execution trace graph",
+    )
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+
+    ctx.register_command(
+        "trace",
+        handler=_handle_trace_command,
+        description="Show the current session's execution trace graph",
+    )
     ctx.register_hook("pre_approval_request", _on_pre_approval_request)
     ctx.register_hook("post_approval_response", _on_post_approval_response)
     ctx.register_hook("on_session_reset", _on_session_reset)
@@ -83,6 +107,12 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+
+    ctx.register_command(
+        "trace",
+        handler=_handle_trace_command,
+        description="Show the current session's execution trace graph",
+    )
 
 
 def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **kwargs):
@@ -380,3 +410,94 @@ def _on_subagent_stop(
         summary=child_summary or "",
         duration_ms=duration_ms,
     )
+
+
+# ---- Slash command handler ------------------------------------------------
+
+
+def _handle_trace_command(raw_args: str) -> str:
+    """Handler for /trace — show the current trace graph as a text tree."""
+    args = raw_args.strip().split()
+    action = args[0] if args else "view"
+
+    if action == "list":
+        traces = list_traces()
+        if not traces:
+            if TRACE_DIR.exists():
+                json_files = sorted(TRACE_DIR.glob("*.json"), reverse=True)
+                if json_files:
+                    lines = ["Past traces on disk:"]
+                    for f in json_files[:10]:
+                        lines.append(f"  - {f.name}")
+                    return "\n".join(lines)
+            return "No active or saved traces found."
+        return "Active traces:\n" + "\n".join(f"  - {t}" for t in traces)
+
+    if action == "view":
+        session_id = args[1] if len(args) > 1 else None
+        trace = get_current_trace(session_id)
+        if trace is None:
+            if session_id:
+                json_path = TRACE_DIR / f"{session_id}.json"
+                if json_path.exists():
+                    return f"Trace exists on disk: {json_path}"
+                return f"No trace found for session {session_id}."
+            if TRACE_DIR.exists():
+                json_files = sorted(TRACE_DIR.glob("*.json"), reverse=True)
+                if json_files:
+                    sid = json_files[0].stem
+                    return (
+                        "No active trace in memory.\n"
+                        f"Most recent saved trace: {sid}\n"
+                        f"Use /trace load {sid} to view it."
+                    )
+            return "No active trace. Start a conversation first!"
+        return trace.to_text_tree()
+
+    if action == "load":
+        if len(args) < 2:
+            return "Usage: /trace load <session_id>"
+        session_id = args[1]
+        json_path = TRACE_DIR / f"{session_id}.json"
+        if not json_path.exists():
+            return f"No saved trace found at {json_path}"
+        try:
+            data = json.loads(json_path.read_text())
+            return f"Trace {session_id}:\n" + json.dumps(data, indent=2)
+        except Exception as exc:
+            return f"Failed to load trace: {exc}"
+
+    if action in ("export", "save"):
+        trace = get_current_trace()
+        if trace is None:
+            return "No active trace to export."
+        try:
+            json_path = trace.write_json()
+            mmd_path = trace.write_mermaid()
+            return f"Trace exported:\n  JSON: {json_path}\n  Mermaid: {mmd_path}"
+        except Exception as exc:
+            return f"Export failed: {exc}"
+
+    if action == "mermaid":
+        trace = get_current_trace()
+        if trace is None:
+            return "No active trace."
+        return trace.to_mermaid()
+
+    if action == "clear":
+        trace = get_current_trace()
+        if trace is not None and trace.session_id:
+            remove_trace(trace.session_id)
+            return f"Cleared active trace for session {trace.session_id}."
+        return "No active trace to clear."
+
+    return (
+        "Usage: /trace [view|list|load <id>|export|mermaid|clear]\n"
+        "  view     - Show current trace as text tree (default)\n"
+        "  list     - List active/saved traces\n"
+        "  load <id> - Load and display a saved trace\n"
+        "  export   - Save current trace to ~/.hermes/traces/\n"
+        "  mermaid  - Show trace as Mermaid flowchart\n"
+        "  clear    - Remove current trace from memory"
+    )
+
