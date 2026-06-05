@@ -80,6 +80,7 @@ class TraceGraph:
     _current_turn: Optional[Turn] = field(default=None, repr=False, init=False)
     _turn_counter: int = field(default=0, repr=False, init=False)
     _span_counter: int = field(default=0, repr=False, init=False)
+    _span_counter: int = field(default=0, repr=False, init=False)
 
     def start_turn(self, user_message: str = "", **metadata) -> Turn:
         self._turn_counter += 1
@@ -217,6 +218,11 @@ class TraceGraph:
             span.status = "interrupted" if interrupted else "abandoned"
         self._active_tool_spans.clear()
         # Close any dangling subagents
+        for sub in list(self._active_subagents.values()):
+            sub.ended_at = time.time()
+            sub.duration_ms = int((sub.ended_at - sub.started_at) * 1000)
+            sub.status = "interrupted" if interrupted else "abandoned"
+        self._active_subagents.clear()
         for sub in list(self._active_subagents.values()):
             sub.ended_at = time.time()
             sub.duration_ms = int((sub.ended_at - sub.started_at) * 1000)
