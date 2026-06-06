@@ -43,6 +43,9 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+    ctx.register_hook("pre_approval_request", _on_pre_approval_request)
+    ctx.register_hook("post_approval_response", _on_post_approval_response)
+    ctx.register_hook("on_session_reset", _on_session_reset)
 
     ctx.register_command(
         "trace",
@@ -54,6 +57,9 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+    ctx.register_hook("pre_approval_request", _on_pre_approval_request)
+    ctx.register_hook("post_approval_response", _on_post_approval_response)
+    ctx.register_hook("on_session_reset", _on_session_reset)
 
     ctx.register_command(
         "trace",
@@ -67,6 +73,9 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+    ctx.register_hook("pre_approval_request", _on_pre_approval_request)
+    ctx.register_hook("post_approval_response", _on_post_approval_response)
+    ctx.register_hook("on_session_reset", _on_session_reset)
 
     ctx.register_command(
         "trace",
@@ -75,6 +84,9 @@ def register(ctx):
     )
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+    ctx.register_hook("pre_approval_request", _on_pre_approval_request)
+    ctx.register_hook("post_approval_response", _on_post_approval_response)
+    ctx.register_hook("on_session_reset", _on_session_reset)
 
     ctx.register_command(
         "trace",
@@ -107,6 +119,9 @@ def register(ctx):
     ctx.register_hook("api_request_error", _on_api_request_error)
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+    ctx.register_hook("pre_approval_request", _on_pre_approval_request)
+    ctx.register_hook("post_approval_response", _on_post_approval_response)
+    ctx.register_hook("on_session_reset", _on_session_reset)
 
     ctx.register_command(
         "trace",
@@ -411,6 +426,63 @@ def _on_subagent_stop(
         duration_ms=duration_ms,
     )
 
+
+def _on_pre_approval_request(
+    command: str = "",
+    description: str = "",
+    pattern_key: str = "",
+    session_key: str = "",
+    surface: str = "",
+    **kwargs,
+):
+    """Capture approval requests as trace events."""
+    if not session_key:
+        return
+    trace = get_trace(session_key)
+    # Attach to current turn, or most recent turn if none is active
+    turn = trace._current_turn or (trace.turns[-1] if trace.turns else None)
+    if turn:
+        turn.metadata.setdefault("approvals", []).append({
+            "event": "requested",
+            "command": command,
+            "description": description,
+            "pattern_key": pattern_key,
+            "surface": surface,
+        })
+
+
+def _on_post_approval_response(
+    command: str = "",
+    description: str = "",
+    pattern_key: str = "",
+    session_key: str = "",
+    surface: str = "",
+    choice: str = "",
+    **kwargs,
+):
+    """Capture approval responses as trace events."""
+    if not session_key:
+        return
+    trace = get_trace(session_key)
+    turn = trace._current_turn or (trace.turns[-1] if trace.turns else None)
+    if turn:
+        turn.metadata.setdefault("approvals", []).append({
+            "event": "responded",
+            "command": command,
+            "choice": choice,
+            "surface": surface,
+        })
+
+
+def _on_session_reset(session_id: str = "", platform: str = "", **kwargs):
+    """Record session reset events."""
+    if not session_id:
+        return
+    trace = get_trace(session_id)
+    trace.metadata.setdefault("lifecycle", []).append({
+        "event": "reset",
+        "platform": platform,
+    })
 
 # ---- Slash command handler ------------------------------------------------
 

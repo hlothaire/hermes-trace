@@ -15,3 +15,6 @@ provides_hooks:
   - post_tool_call
   - subagent_start
   - subagent_stop
+  - pre_approval_request
+  - post_approval_response
+  - on_session_reset
