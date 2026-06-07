@@ -1,11 +1,12 @@
 name: hermes-trace
 version: 0.1.0
-description: Build a trace graph of Hermes agent execution
+description: Build a trace graph of Hermes agent execution — capture turns, LLM calls, tool calls, subagents, and approvals. View with /trace.
 author: user
 provides_hooks:
   - on_session_start
   - on_session_end
   - on_session_finalize
+  - on_session_reset
   - pre_llm_call
   - post_llm_call
   - pre_api_request
@@ -17,4 +18,3 @@ provides_hooks:
   - subagent_stop
   - pre_approval_request
   - post_approval_response
-  - on_session_reset
