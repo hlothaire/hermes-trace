@@ -81,6 +81,17 @@ class TraceGraph:
     _turn_counter: int = field(default=0, repr=False, init=False)
     _span_counter: int = field(default=0, repr=False, init=False)
 
+    def ensure_started(self) -> bool:
+        """Backfill started_at if the session_start hook fired before agent init.
+
+        Returns True if a backfill was performed, False if started_at was already set.
+        """
+        if self.started_at == 0.0:
+            self.started_at = time.time()
+            logger.debug("Trace: backfilled started_at for session %s", self.session_id)
+            return True
+        return False
+
     def start_turn(self, user_message: str = "", **metadata) -> Turn:
         self._turn_counter += 1
         turn = Turn(

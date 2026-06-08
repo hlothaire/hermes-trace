@@ -102,6 +102,8 @@ def _on_pre_llm_call(
     **kwargs,
 ):
     trace = get_trace(session_id)
+    # Backfill started_at if session_start hook fired before agent initialisation
+    trace.ensure_started()
     trace.start_turn(user_message=user_message, is_first_turn=is_first_turn)
 
 
@@ -129,6 +131,12 @@ def _on_pre_api_request(
     **kwargs,
 ):
     trace = get_trace(session_id)
+    # Backfill session-level metadata if session_start hook fired too early
+    if not trace.model and model:
+        trace.model = model
+        logger.debug("Trace: backfilled model=%s for session %s", model, session_id)
+    if not trace.platform and provider:
+        trace.platform = provider
     trace.start_llm_call(
         api_call_count=api_call_count,
         model=model,
