@@ -289,6 +289,62 @@ class TraceGraph:
             "metadata": self.metadata,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TraceGraph":
+        """Reconstruct a TraceGraph from its JSON-serialized dict.
+
+        Restores the full object tree so that to_text_tree() and other
+        output methods work on loaded traces.
+        """
+
+        def dict_to_span(d: dict) -> Span:
+            return Span(
+                name=d.get("name", ""),
+                kind=d.get("kind", ""),
+                started_at=d.get("started_at", 0.0),
+                ended_at=d.get("ended_at", 0.0),
+                duration_ms=d.get("duration_ms", 0),
+                metadata=d.get("metadata", {}),
+                status=d.get("status", "completed"),
+                children=[dict_to_span(c) for c in d.get("children", [])],
+            )
+
+        trace = cls(session_id=data["session_id"])
+        trace.model = data.get("model", "")
+        trace.platform = data.get("platform", "")
+        trace.started_at = data.get("started_at", 0.0)
+        trace.ended_at = data.get("ended_at", 0.0)
+        trace.metadata = data.get("metadata", {})
+
+        for t_data in data.get("turns", []):
+            turn = Turn(
+                index=t_data.get("index", 0),
+                user_message=t_data.get("user_message", ""),
+                assistant_response=t_data.get("assistant_response", ""),
+                started_at=t_data.get("started_at", 0.0),
+                ended_at=t_data.get("ended_at", 0.0),
+                spans=[dict_to_span(s) for s in t_data.get("spans", [])],
+                metadata=t_data.get("metadata", {}),
+            )
+            trace.turns.append(turn)
+            if turn.index > trace._turn_counter:
+                trace._turn_counter = turn.index
+
+        for s_data in data.get("subagents", []):
+            sub = Subagent(
+                child_session_id=s_data.get("child_session_id", ""),
+                parent_session_id=s_data.get("parent_session_id", ""),
+                goal=s_data.get("goal", ""),
+                status=s_data.get("status", "completed"),
+                started_at=s_data.get("started_at", 0.0),
+                ended_at=s_data.get("ended_at", 0.0),
+                duration_ms=s_data.get("duration_ms", 0),
+                summary=s_data.get("summary", ""),
+            )
+            trace.subagents.append(sub)
+
+        return trace
+
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str)
 

@@ -366,7 +366,8 @@ def _handle_trace_command(raw_args: str) -> str:
             return f"No saved trace found at {json_path}"
         try:
             data = json.loads(json_path.read_text())
-            return f"Trace {session_id}:\n" + json.dumps(data, indent=2)
+            trace = TraceGraph.from_dict(data)
+            return trace.to_text_tree()
         except Exception as exc:
             return f"Failed to load trace: {exc}"
 
