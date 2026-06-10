@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 TRACE_DIR = Path.home() / ".hermes" / "traces"
 
+# Status values that represent successful completion
+_OK_STATUSES = frozenset({"completed", "ok"})
+
 
 @dataclass
 class Span:
@@ -400,7 +403,7 @@ class TraceGraph:
                     lines.append(f'  {sid}["{label}"]')
                     lines.append(f"  {tid} --> {sid}")
                 elif span.kind == "tool_call":
-                    status_icon = "&#10003;" if span.status == "completed" else "&#10007;"
+                    status_icon = "&#10003;" if span.status in _OK_STATUSES else "&#10007;"
                     label = f"{status_icon} {_sanitize(span.name)}"
                     label += f"<br/>{span.duration_ms}ms"
                     args = span.metadata.get("args", {})
@@ -413,7 +416,7 @@ class TraceGraph:
         # Subagents
         for i, sub in enumerate(self.subagents):
             sid = f"SUB{i}"
-            status_icon = "&#10003;" if sub.status == "completed" else "&#10007;"
+            status_icon = "&#10003;" if sub.status in _OK_STATUSES else "&#10007;"
             label = f"{status_icon} subagent {_sanitize(sub.child_session_id[:12])}..."
             label += f"<br/>{sub.duration_ms}ms"
             if sub.goal:
@@ -431,6 +434,64 @@ class TraceGraph:
         path.write_text(self.to_mermaid(), encoding="utf-8")
         logger.info("Mermaid trace written to %s", path)
         return path
+
+    # ---- Stats ------------------------------------------------------------
+
+    def compute_stats(self) -> dict[str, Any]:
+        """Aggregate statistics for the entire trace.
+
+        Returns a dict with keys:
+          turns, llm_calls, tool_calls, errors,
+          total_input_tokens, total_output_tokens,
+          slowest_llm, slowest_tool.
+        """
+        llm_calls = 0
+        tool_calls = 0
+        errors = 0
+        total_in = 0
+        total_out = 0
+        slowest_llm: dict[str, Any] = {}
+        slowest_tool: dict[str, Any] = {}
+
+        for turn in self.turns:
+            for span in turn.spans:
+                if span.kind == "llm_call":
+                    llm_calls += 1
+                    if span.status not in _OK_STATUSES:
+                        errors += 1
+                    usage = span.metadata.get("usage", {})
+                    in_tok = usage.get("input_tokens", 0) or 0
+                    out_tok = usage.get("output_tokens", 0) or 0
+                    total_in += in_tok
+                    total_out += out_tok
+
+                    if span.duration_ms > slowest_llm.get("duration_ms", 0):
+                        slowest_llm = {
+                            "api_call_count": span.metadata.get("api_call_count", "?"),
+                            "duration_ms": span.duration_ms,
+                        }
+
+                elif span.kind == "tool_call":
+                    tool_calls += 1
+                    if span.status not in _OK_STATUSES:
+                        errors += 1
+
+                    if span.duration_ms > slowest_tool.get("duration_ms", 0):
+                        slowest_tool = {
+                            "name": span.name,
+                            "duration_ms": span.duration_ms,
+                        }
+
+        return {
+            "turns": len(self.turns),
+            "llm_calls": llm_calls,
+            "tool_calls": tool_calls,
+            "errors": errors,
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
+            "slowest_llm": slowest_llm,
+            "slowest_tool": slowest_tool,
+        }
 
     def to_text_tree(self) -> str:
         """Generate a simple text tree of the trace (for /trace command)."""
@@ -455,7 +516,7 @@ class TraceGraph:
                         f"in:{tokens.get('input_tokens','?')} out:{tokens.get('output_tokens','?')})"
                     )
                 elif span.kind == "tool_call":
-                    status = "✓" if span.status == "completed" else "✗"
+                    status = "✓" if span.status in _OK_STATUSES else "✗"
                     lines.append(
                         f"{prefix} {status} {span.name} ({span.duration_ms}ms)"
                     )
@@ -466,11 +527,44 @@ class TraceGraph:
         if self.subagents:
             lines.append(f"├── Subagents: {len(self.subagents)}")
             for sub in self.subagents:
-                status = "✓" if sub.status == "completed" else "✗"
+                status = "✓" if sub.status in _OK_STATUSES else "✗"
                 lines.append(
                     f"│   ├── {status} {sub.child_session_id[:12]}... "
                     f"({sub.duration_ms}ms)"
                 )
+
+        # ---- Stats footer -------------------------------------------------
+
+        stats = self.compute_stats()
+        lines.append("")
+        lines.append("─── Stats ───")
+
+        parts = [
+            f"Turns: {stats['turns']}",
+            f"LLM calls: {stats['llm_calls']}",
+            f"Tool calls: {stats['tool_calls']}",
+        ]
+        if stats["errors"]:
+            parts.append(f"Errors: {stats['errors']}")
+        lines.append("  ".join(parts))
+
+        tok_parts = [
+            f"Tokens: {stats['total_input_tokens']:,} in / {stats['total_output_tokens']:,} out",
+        ]
+        lines.append("  ".join(tok_parts))
+
+        slow = stats["slowest_llm"]
+        if slow:
+            lines.append(
+                f"Slowest LLM: #{slow['api_call_count']} "
+                f"({slow['duration_ms'] / 1000:.1f}s)"
+            )
+        slow = stats["slowest_tool"]
+        if slow:
+            lines.append(
+                f"Slowest tool: {slow['name']} "
+                f"({slow['duration_ms'] / 1000:.1f}s)"
+            )
 
         return "\n".join(lines)
 
