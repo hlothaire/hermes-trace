@@ -46,6 +46,9 @@ def register(ctx):
     ctx.register_hook("pre_approval_request", _on_pre_approval_request)
     ctx.register_hook("post_approval_response", _on_post_approval_response)
     ctx.register_hook("on_session_reset", _on_session_reset)
+    ctx.register_hook("transform_tool_result", _on_transform_tool_result)
+    ctx.register_hook("transform_llm_output", _on_transform_llm_output)
+    ctx.register_hook("pre_gateway_dispatch", _on_pre_gateway_dispatch)
 
     ctx.register_command(
         "trace",
@@ -302,6 +305,87 @@ def _on_post_approval_response(
             "choice": choice,
             "surface": surface,
         })
+
+
+# ---- Transform hooks (observer only — never modify the payload) ----------
+
+
+def _on_transform_tool_result(
+    tool_name: str = "",
+    args: Optional[dict] = None,
+    result: str = "",
+    task_id: str = "",
+    session_id: str = "",
+    **kwargs,
+):
+    """Capture tool result as seen by the model after all transforms.
+
+    Fires after post_tool_call but before the result is handed back to
+    the LLM.  We annotate the most recently ended tool span in the
+    current turn so the trace reflects what the model actually received.
+    """
+    # Return None → never modify the result (observer only)
+    sid = session_id or task_id
+    if not sid:
+        return None
+    trace = get_trace(sid)
+    turn = trace._current_turn or (trace.turns[-1] if trace.turns else None)
+    if turn and turn.spans:
+        # Walk backwards to find the most recent tool_call span
+        for span in reversed(turn.spans):
+            if span.kind == "tool_call" and span.name == tool_name:
+                span.metadata["transformed_result"] = result[:500] if result else ""
+                break
+    return None
+
+
+def _on_transform_llm_output(
+    session_id: str = "",
+    user_message: str = "",
+    assistant_response: str = "",
+    conversation_history: Optional[list] = None,
+    model: str = "",
+    platform: str = "",
+    **kwargs,
+):
+    """Capture the final assistant response after all transforms.
+
+    Fires after post_llm_call but before the response is delivered to
+    the user.  We store the transformed version on the current turn so
+    the trace shows what the user actually received.
+    """
+    if not session_id:
+        return None
+    trace = get_trace(session_id)
+    turn = trace._current_turn or (trace.turns[-1] if trace.turns else None)
+    if turn and assistant_response:
+        turn.metadata["transformed_response"] = assistant_response[:500]
+    return None  # never modify the response
+
+
+def _on_pre_gateway_dispatch(
+    event: Any = None,
+    gateway: Any = None,
+    session_store: Any = None,
+    **kwargs,
+):
+    """Capture gateway message dispatch events.
+
+    Fires once per incoming MessageEvent in the gateway, before auth /
+    pairing / agent dispatch.  Since no session exists yet we record a
+    lightweight event that can be correlated once on_session_start fires.
+    """
+    if event is None:
+        return None
+    src = getattr(event, "source", "?")
+    text = getattr(event, "text", "")[:200] if hasattr(event, "text") else ""
+    # Log only — full trace correlation happens when the session starts
+    logger.debug(
+        "Trace: gateway dispatch source=%s text=%s",
+        src,
+        text,
+    )
+    return None
 
 
 def _on_session_reset(session_id: str = "", platform: str = "", **kwargs):
