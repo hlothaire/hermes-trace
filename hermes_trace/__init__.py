@@ -56,6 +56,14 @@ def register(ctx):
         description="Show the current session's execution trace graph",
     )
 
+    from .cli import _setup_argparse, _handle_command
+    ctx.register_cli_command(
+        name="trace",
+        help="Query and manage trace graphs",
+        setup_fn=_setup_argparse,
+        handler_fn=_handle_command,
+    )
+
 
 # ---- Hook callbacks -------------------------------------------------------
 
