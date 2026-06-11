@@ -34,15 +34,33 @@ or Mermaid diagrams, or query them from the terminal with `hermes trace`.
 
 ## Installation
 
-```bash
-# Copy the plugin into your Hermes profile
-cp -r hermes_trace/ plugin.yaml ~/.hermes/plugins/hermes-trace/
+### pip (recommended)
 
-# Or symlink for development
-ln -s "$PWD" ~/.hermes/plugins/hermes-trace
+```bash
+pip install hermes-trace
 ```
 
-Then restart Hermes or run `hermes plugins reload`.
+Hermes auto-discovers the plugin via the `hermes_agent.plugins` entry point.
+Then enable it:
+
+```bash
+hermes plugins enable hermes-trace
+```
+
+### From Git
+
+```bash
+hermes plugins install hlothaire/hermes-trace
+hermes plugins enable hermes-trace
+```
+
+### Manual (development)
+
+```bash
+git clone https://github.com/hlothaire/hermes-trace
+ln -s "$PWD/hermes-trace" ~/.hermes/plugins/hermes-trace/
+hermes plugins enable hermes-trace
+```
 
 ## Architecture
 

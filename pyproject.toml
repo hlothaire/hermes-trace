@@ -14,6 +14,9 @@ dev = [
     "ruff>=0.11",
 ]
 
+[project.entry-points."hermes_agent.plugins"]
+hermes-trace = "hermes_trace"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120
