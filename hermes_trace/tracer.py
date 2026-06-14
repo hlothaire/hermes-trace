@@ -180,7 +180,12 @@ class TraceGraph:
         if span is None:
             return None
         span.ended_at = time.time()
-        span.duration_ms = int((span.ended_at - span.started_at) * 1000)
+        # Prefer the hook-provided duration; fall back to wall-clock delta
+        hook_duration = metadata.pop("duration_ms", None)
+        if hook_duration is not None and isinstance(hook_duration, int) and hook_duration >= 0:
+            span.duration_ms = hook_duration
+        else:
+            span.duration_ms = int((span.ended_at - span.started_at) * 1000)
         span.status = status
         span.metadata.update(metadata)
         logger.debug("Trace: tool call '%s' ended (%dms, %s)", tool_name, span.duration_ms, status)
