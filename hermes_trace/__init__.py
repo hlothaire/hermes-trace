@@ -29,6 +29,30 @@ from .tracer import (
 )
 
 
+# ---- Error-resilient hook wrapper ------------------------------------------
+
+
+def _trace_hook(name: str):
+    """Decorator that wraps a hook callback in try/except.
+
+    On exception, logs the error and returns None — the agent
+    continues normally.  One broken callback never orphans spans
+    or crashes the agent.
+    """
+    import functools
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return fn(*args, **kwargs)
+            except Exception:
+                logger.exception("Trace hook '%s' crashed — continuing", name)
+                return None
+        return wrapper
+    return decorator
+
+
 def register(ctx):
     """Register all trace hooks and the /trace slash command."""
     ctx.register_hook("on_session_start", _on_session_start)
@@ -68,6 +92,7 @@ def register(ctx):
 # ---- Hook callbacks -------------------------------------------------------
 
 
+@_trace_hook("on_session_start")
 def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **kwargs):
     trace = get_trace(session_id)
     trace.model = model
@@ -76,6 +101,7 @@ def _on_session_start(session_id: str = "", model: str = "", platform: str = "",
     logger.info("Trace started: session=%s model=%s platform=%s", session_id, model, platform)
 
 
+@_trace_hook("on_session_end")
 def _on_session_end(
     session_id: str = "",
     completed: bool = False,
@@ -99,6 +125,7 @@ def _on_session_end(
         logger.error("Failed to write trace for session %s: %s", session_id, exc)
 
 
+@_trace_hook("on_session_finalize")
 def _on_session_finalize(session_id: Optional[str] = None, **kwargs):
     if session_id:
         removed = remove_trace(session_id)
@@ -106,6 +133,7 @@ def _on_session_finalize(session_id: Optional[str] = None, **kwargs):
             logger.debug("Trace finalized and removed: %s", session_id)
 
 
+@_trace_hook("pre_llm_call")
 def _on_pre_llm_call(
     session_id: str = "",
     user_message: str = "",
@@ -118,6 +146,7 @@ def _on_pre_llm_call(
     trace.start_turn(user_message=user_message, is_first_turn=is_first_turn)
 
 
+@_trace_hook("post_llm_call")
 def _on_post_llm_call(
     session_id: str = "",
     assistant_response: str = "",
@@ -127,6 +156,7 @@ def _on_post_llm_call(
     trace.end_turn(assistant_response=assistant_response)
 
 
+@_trace_hook("pre_api_request")
 def _on_pre_api_request(
     session_id: str = "",
     api_call_count: int = 0,
@@ -162,6 +192,7 @@ def _on_pre_api_request(
     )
 
 
+@_trace_hook("post_api_request")
 def _on_post_api_request(
     session_id: str = "",
     usage: Optional[dict] = None,
@@ -180,6 +211,7 @@ def _on_post_api_request(
     )
 
 
+@_trace_hook("api_request_error")
 def _on_api_request_error(session_id: str = "", error: Any = None, **kwargs):
     trace = get_trace(session_id)
     trace.end_llm_call(
@@ -188,6 +220,7 @@ def _on_api_request_error(session_id: str = "", error: Any = None, **kwargs):
     )
 
 
+@_trace_hook("pre_tool_call")
 def _on_pre_tool_call(
     tool_name: str = "",
     args: Optional[dict] = None,
@@ -204,6 +237,7 @@ def _on_pre_tool_call(
     )
 
 
+@_trace_hook("post_tool_call")
 def _on_post_tool_call(
     tool_name: str = "",
     args: Optional[dict] = None,
@@ -238,6 +272,7 @@ def _on_post_tool_call(
     )
 
 
+@_trace_hook("subagent_start")
 def _on_subagent_start(
     session_id: str = "",
     **kwargs,
@@ -251,6 +286,7 @@ def _on_subagent_start(
     )
 
 
+@_trace_hook("subagent_stop")
 def _on_subagent_stop(
     parent_session_id: str = "",
     child_status: str = "completed",
@@ -268,6 +304,7 @@ def _on_subagent_stop(
     )
 
 
+@_trace_hook("pre_approval_request")
 def _on_pre_approval_request(
     command: str = "",
     description: str = "",
@@ -292,6 +329,7 @@ def _on_pre_approval_request(
         })
 
 
+@_trace_hook("post_approval_response")
 def _on_post_approval_response(
     command: str = "",
     description: str = "",
@@ -318,6 +356,7 @@ def _on_post_approval_response(
 # ---- Transform hooks (observer only — never modify the payload) ----------
 
 
+@_trace_hook("transform_tool_result")
 def _on_transform_tool_result(
     tool_name: str = "",
     args: Optional[dict] = None,
@@ -347,6 +386,7 @@ def _on_transform_tool_result(
     return None
 
 
+@_trace_hook("transform_llm_output")
 def _on_transform_llm_output(
     session_id: str = "",
     user_message: str = "",
@@ -371,6 +411,7 @@ def _on_transform_llm_output(
     return None  # never modify the response
 
 
+@_trace_hook("pre_gateway_dispatch")
 def _on_pre_gateway_dispatch(
     event: Any = None,
     gateway: Any = None,
@@ -396,6 +437,7 @@ def _on_pre_gateway_dispatch(
     return None
 
 
+@_trace_hook("on_session_reset")
 def _on_session_reset(session_id: str = "", platform: str = "", **kwargs):
     """Record session reset events."""
     if not session_id:
