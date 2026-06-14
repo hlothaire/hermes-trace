@@ -83,6 +83,7 @@ class TraceGraph:
     _current_turn: Optional[Turn] = field(default=None, repr=False, init=False)
     _turn_counter: int = field(default=0, repr=False, init=False)
     _span_counter: int = field(default=0, repr=False, init=False)
+    _llm_counter: int = field(default=0, repr=False, init=False)  # monotonic per turn
 
     def ensure_started(self) -> bool:
         """Backfill started_at if the session_start hook fired before agent init.
@@ -97,6 +98,7 @@ class TraceGraph:
 
     def start_turn(self, user_message: str = "", **metadata) -> Turn:
         self._turn_counter += 1
+        self._llm_counter = 0  # reset per turn
         turn = Turn(
             index=self._turn_counter,
             user_message=user_message,
@@ -119,6 +121,11 @@ class TraceGraph:
         return turn
 
     def start_llm_call(self, **metadata) -> Span:
+        self._llm_counter += 1
+        # Store both the monotonic index and the hook-provided call count
+        api_call_count = metadata.get("api_call_count", self._llm_counter)
+        metadata["llm_index"] = self._llm_counter
+        metadata.setdefault("api_call_count", api_call_count)
         span = Span(
             name="llm_call",
             kind="llm_call",
@@ -129,7 +136,11 @@ class TraceGraph:
         self._active_llm_span = span
         if self._current_turn:
             self._current_turn.spans.append(span)
-        logger.debug("Trace: LLM call started (call #%s)", metadata.get("api_call_count", "?"))
+        logger.debug(
+            "Trace: LLM call #%d started (hook count=%s)",
+            self._llm_counter,
+            api_call_count,
+        )
         return span
 
     def end_llm_call(self, status: str = "completed", **metadata) -> Optional[Span]:
@@ -402,7 +413,7 @@ class TraceGraph:
             for j, span in enumerate(turn.spans):
                 sid = f"{tid}_S{j}"
                 if span.kind == "llm_call":
-                    label = f"LLM #{span.metadata.get('api_call_count','?')}"
+                    label = f"LLM #{span.metadata.get('llm_index','?')}"
                     label += f"<br/>{span.duration_ms}ms"
                     label += f"<br/>tokens: {span.metadata.get('usage',{}).get('input_tokens','?')}→{span.metadata.get('usage',{}).get('output_tokens','?')}"
                     lines.append(f'  {sid}["{label}"]')
@@ -472,7 +483,7 @@ class TraceGraph:
 
                     if span.duration_ms > slowest_llm.get("duration_ms", 0):
                         slowest_llm = {
-                            "api_call_count": span.metadata.get("api_call_count", "?"),
+                            "api_call_count": span.metadata.get("llm_index", "?"),
                             "duration_ms": span.duration_ms,
                         }
 
@@ -516,7 +527,7 @@ class TraceGraph:
                 if span.kind == "llm_call":
                     tokens = span.metadata.get("usage", {})
                     lines.append(
-                        f"{prefix} LLM #{span.metadata.get('api_call_count','?')} "
+                        f"{prefix} LLM #{span.metadata.get('llm_index','?')} "
                         f"({span.duration_ms}ms, "
                         f"in:{tokens.get('input_tokens','?')} out:{tokens.get('output_tokens','?')})"
                     )

@@ -350,3 +350,54 @@ class TestRegistry:
         removed = remove_trace("session-x")
         assert removed is not None
         assert remove_trace("session-x") is None
+
+
+# ---- llm_index / compression epochs ---------------------------------------
+
+
+class TestLLMIndex:
+    def test_monotonic_within_turn(self, trace):
+        """llm_index never resets, even when api_call_count does."""
+        trace.start_turn(user_message="long turn")
+        # Simulate normal calls
+        trace.start_llm_call(api_call_count=1)
+        trace.end_llm_call(status="completed")
+        trace.start_llm_call(api_call_count=2)
+        trace.end_llm_call(status="completed")
+        # Simulate context compression — api_call_count resets
+        trace.start_llm_call(api_call_count=1)  # hook restarted
+        trace.end_llm_call(status="completed")
+        trace.start_llm_call(api_call_count=2)
+        trace.end_llm_call(status="completed")
+        trace.end_turn()
+
+        spans = trace.turns[0].spans
+        indices = [s.metadata["llm_index"] for s in spans if s.kind == "llm_call"]
+        assert indices == [1, 2, 3, 4]  # monotonic, never reset
+
+    def test_resets_between_turns(self, trace):
+        """llm_index resets to 1 for each new turn."""
+        trace.start_turn(user_message="turn 1")
+        trace.start_llm_call(api_call_count=1)
+        trace.end_llm_call(status="completed")
+        trace.start_llm_call(api_call_count=2)
+        trace.end_llm_call(status="completed")
+        trace.end_turn()
+
+        trace.start_turn(user_message="turn 2")
+        trace.start_llm_call(api_call_count=1)
+        trace.end_llm_call(status="completed")
+        trace.end_turn()
+
+        t1_indices = [s.metadata["llm_index"] for s in trace.turns[0].spans if s.kind == "llm_call"]
+        t2_indices = [s.metadata["llm_index"] for s in trace.turns[1].spans if s.kind == "llm_call"]
+        assert t1_indices == [1, 2]
+        assert t2_indices == [1]  # fresh start
+
+    def test_no_api_call_count_defaults_to_llm_index(self, trace):
+        """When hook doesn't provide api_call_count, llm_index still works."""
+        trace.start_turn(user_message="hi")
+        trace.start_llm_call()  # no api_call_count kwarg
+        span = trace.end_llm_call(status="completed")
+        assert span.metadata["llm_index"] == 1
+        assert span.metadata["api_call_count"] == 1  # defaults to llm_index
