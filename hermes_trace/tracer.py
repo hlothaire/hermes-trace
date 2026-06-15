@@ -584,6 +584,66 @@ class TraceGraph:
 
         return "\n".join(lines)
 
+    def to_gantt(self, bar_width: int = 70) -> str:
+        """ASCII Gantt chart showing span concurrency and bottlenecks.
+
+        Each turn gets a timeline row with horizontal bars positioned
+        relative to the turn's wall-clock start.  Tool spans are
+        indented under their preceding LLM span.
+
+        The slowest LLM span is annotated with ``← bottleneck``.
+        """
+        lines: list[str] = []
+        stats = self.compute_stats()
+        slowest_llm_key: tuple[int, int] | None = None
+        if stats["slowest_llm"]:
+            slowest_llm_key = (
+                stats["slowest_llm"].get("api_call_count", -1),
+                stats["slowest_llm"].get("duration_ms", 0),
+            )
+
+        for turn in self.turns:
+            if not turn.spans:
+                continue
+            turn_dur = turn.ended_at - turn.started_at if turn.ended_at else 0
+            if turn_dur <= 0:
+                turn_dur = max(
+                    (s.ended_at - turn.started_at)
+                    for s in turn.spans
+                    if s.ended_at > 0
+                ) or 1
+
+            td = round(turn_dur, 1)
+            lines.append(f"Turn {turn.index} ({td}s)")
+
+            for span in turn.spans:
+                offset = max(span.started_at - turn.started_at, 0)
+                dur_s = span.duration_ms / 1000
+
+                # Build label
+                if span.kind == "llm_call":
+                    label = f"  LLM #{span.metadata.get('llm_index', '?')}"
+                else:
+                    label = f"    {span.name}"
+
+                # Build bar
+                pos = int((offset / turn_dur) * bar_width)
+                width = max(1, int((dur_s / turn_dur) * bar_width))
+                bar = "░" * pos + "█" * width + "░" * max(0, bar_width - pos - width)
+
+                # Annotate bottleneck
+                tag = ""
+                if (
+                    span.kind == "llm_call"
+                    and slowest_llm_key
+                    and span.metadata.get("llm_index") == slowest_llm_key[0]
+                ):
+                    tag = "  ← bottleneck"
+
+                lines.append(f"{label:<20s} {bar} {dur_s:.1f}s{tag}")
+
+        return "\n".join(lines) if lines else "(no spans)"
+
 
 # Thread-safe registry of active traces by session_id
 _traces: dict[str, TraceGraph] = {}

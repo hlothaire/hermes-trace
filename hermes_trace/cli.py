@@ -179,6 +179,10 @@ def _setup_argparse(subparser: argparse.ArgumentParser) -> None:
     clean_p = subs.add_parser("clean", help="Rotate old traces")
     clean_p.add_argument("--keep", type=int, default=20, help="Number of recent traces to keep (default: 20)")
 
+    # gantt <session_id>
+    gantt_p = subs.add_parser("gantt", help="Show ASCII Gantt timeline")
+    gantt_p.add_argument("session_id", help="Session ID (can be a prefix)")
+
     subparser.set_defaults(func=_handle_command)
 
 
@@ -192,15 +196,40 @@ def _handle_command(args: argparse.Namespace) -> None:
         _view_trace(args.session_id)
     elif cmd == "stats":
         _stats_trace(args.session_id)
+    elif cmd == "gantt":
+        _gantt_trace(args.session_id)
     elif cmd == "clean":
         _clean_traces(args.keep)
     else:
         # No subcommand given — show help
-        print("Usage: hermes trace <list|view <id>|stats <id>|clean>")
+        print("Usage: hermes trace <list|view <id>|stats <id>|gantt <id>|clean>")
         print()
         print("Subcommands:")
         print("  list              List saved traces")
         print("  view <session_id> Show text tree for a trace")
         print("  stats <session_id> Show aggregate statistics")
+        print("  gantt <session_id> Show ASCII Gantt timeline")
         print("  clean --keep N    Rotate old traces (default: keep 20)")
+        sys.exit(1)
+
+
+def _gantt_trace(session_id: str) -> None:
+    """Show the Gantt timeline for a saved trace."""
+    json_path = TRACE_DIR / f"{session_id}.json"
+    if not json_path.exists():
+        matches = sorted(TRACE_DIR.glob(f"{session_id}*.json"))
+        if not matches:
+            print(f"No trace found for session '{session_id}'.")
+            sys.exit(1)
+        if len(matches) > 1:
+            print(f"Ambiguous session ID. Candidates: {', '.join(m.stem for m in matches)}")
+            sys.exit(1)
+        json_path = matches[0]
+
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        trace = TraceGraph.from_dict(data)
+        print(trace.to_gantt())
+    except Exception as exc:
+        print(f"Failed to load trace: {exc}")
         sys.exit(1)

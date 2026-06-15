@@ -401,3 +401,31 @@ class TestLLMIndex:
         span = trace.end_llm_call(status="completed")
         assert span.metadata["llm_index"] == 1
         assert span.metadata["api_call_count"] == 1  # defaults to llm_index
+
+
+# ---- gantt ----------------------------------------------------------------
+
+
+class TestGantt:
+    def test_produces_output(self, populated_trace):
+        gantt = populated_trace.to_gantt()
+        assert "Turn 1" in gantt
+        assert "LLM #1" in gantt
+        assert "read_file" in gantt
+        assert "terminal" in gantt
+
+    def test_empty_trace(self, trace):
+        assert trace.to_gantt() == "(no spans)"
+
+    def test_bottleneck_annotation(self, trace):
+        trace.start_turn(user_message="hi")
+        trace.start_llm_call(api_call_count=1)
+        import time
+        time.sleep(0.002)
+        trace.end_llm_call(status="completed")
+        trace.start_llm_call(api_call_count=2)
+        trace.end_llm_call(status="completed")
+        trace.end_turn()
+        gantt = trace.to_gantt()
+        # The first LLM call should be slower (had sleep), so LLM #1 gets bottleneck
+        assert "← bottleneck" in gantt

@@ -529,12 +529,19 @@ def _handle_trace_command(raw_args: str) -> str:
             return f"Cleared active trace for session {trace.session_id}."
         return "No active trace to clear."
 
+    if action == "gantt":
+        trace = get_current_trace()
+        if trace is None:
+            return "No active trace."
+        return trace.to_gantt()
+
     return (
-        "Usage: /trace [view|list|load <id>|export|mermaid|clear]\n"
+        "Usage: /trace [view|list|load <id>|export|mermaid|gantt|clear]\n"
         "  view     - Show current trace as text tree (default)\n"
         "  list     - List active/saved traces\n"
         "  load <id> - Load and display a saved trace\n"
         "  export   - Save current trace to ~/.hermes/traces/\n"
         "  mermaid  - Show trace as Mermaid flowchart\n"
+        "  gantt    - Show ASCII Gantt timeline\n"
         "  clear    - Remove current trace from memory"
     )
