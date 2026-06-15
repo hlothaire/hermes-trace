@@ -19,6 +19,10 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Map child_session_id → parent_session_id for cross-trace navigation.
+# Populated by subagent_stop, consumed by on_session_end.
+_pending_parent_links: dict[str, str] = {}
+
 from .tracer import (
     TraceGraph,
     TRACE_DIR,
@@ -92,6 +96,23 @@ def register(ctx):
 # ---- Hook callbacks -------------------------------------------------------
 
 
+def _patch_parent_trace(json_path: Path, parent_session_id: str) -> None:
+    """Patch a trace JSON file to include a ``parent_trace`` reference.
+
+    Used for subagent child → parent navigation.  Never raises.
+    """
+    if not json_path.exists():
+        return
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        if "parent_trace" not in data:
+            data["parent_trace"] = parent_session_id
+            json_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+            logger.debug("Patched parent_trace=%s into %s", parent_session_id, json_path.name)
+    except Exception:
+        logger.debug("Failed to read/patch %s", json_path.name)
+
+
 @_trace_hook("on_session_start")
 def _on_session_start(session_id: str = "", model: str = "", platform: str = "", **kwargs):
     trace = get_trace(session_id)
@@ -115,6 +136,15 @@ def _on_session_end(
     try:
         json_path = trace.write_json()
         mmd_path = trace.write_mermaid()
+
+        # If this session is a subagent child, patch parent_trace into JSON
+        parent_sid = _pending_parent_links.pop(session_id, None)
+        if parent_sid:
+            try:
+                _patch_parent_trace(json_path, parent_sid)
+            except Exception:
+                logger.debug("Failed to patch parent_trace for child %s", session_id)
+
         logger.info(
             "Trace session=%s saved: %s, %s",
             session_id,
@@ -295,13 +325,28 @@ def _on_subagent_stop(
     **kwargs,
 ):
     child_session_id = kwargs.get("child_session_id", kwargs.get("child_task_id", "?"))
-    trace = get_trace(parent_session_id)
+    child_sid = str(child_session_id)
+    parent_sid = str(parent_session_id)
+
+    trace = get_trace(parent_sid)
     trace.end_subagent(
-        child_session_id=str(child_session_id),
+        child_session_id=child_sid,
         status=child_status,
         summary=child_summary or "",
         duration_ms=duration_ms,
     )
+
+    # Store parent link for cross-trace navigation
+    if child_sid and parent_sid:
+        _pending_parent_links[child_sid] = parent_sid
+
+        # If the child's trace JSON already exists, patch it now
+        child_json = TRACE_DIR / f"{child_sid}.json"
+        if child_json.exists():
+            try:
+                _patch_parent_trace(child_json, parent_sid)
+            except Exception:
+                logger.debug("Failed to patch parent_trace into %s", child_sid)
 
 
 @_trace_hook("pre_approval_request")

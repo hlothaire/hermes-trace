@@ -75,6 +75,7 @@ class TraceGraph:
     turns: list[Turn] = field(default_factory=list)
     subagents: list[Subagent] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    parent_trace: str = ""  # parent session ID when this is a subagent child
 
     # Track active spans by key for matching pre/post calls
     _active_llm_span: Optional[Span] = field(default=None, repr=False, init=False)
@@ -306,6 +307,7 @@ class TraceGraph:
                 for s in self.subagents
             ],
             "metadata": self.metadata,
+            "parent_trace": self.parent_trace or None,
         }
 
     @classmethod
@@ -334,6 +336,7 @@ class TraceGraph:
         trace.started_at = data.get("started_at", 0.0)
         trace.ended_at = data.get("ended_at", 0.0)
         trace.metadata = data.get("metadata", {})
+        trace.parent_trace = data.get("parent_trace") or ""
 
         for t_data in data.get("turns", []):
             turn = Turn(

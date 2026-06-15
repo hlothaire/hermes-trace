@@ -429,3 +429,23 @@ class TestGantt:
         gantt = trace.to_gantt()
         # The first LLM call should be slower (had sleep), so LLM #1 gets bottleneck
         assert "← bottleneck" in gantt
+
+
+# ---- parent_trace linking -------------------------------------------------
+
+
+class TestParentTrace:
+    def test_stored_in_dict(self, trace):
+        trace.parent_trace = "parent-session-123"
+        d = trace.to_dict()
+        assert d["parent_trace"] == "parent-session-123"
+
+    def test_omitted_when_empty(self, trace):
+        d = trace.to_dict()
+        assert d["parent_trace"] is None
+
+    def test_round_trip(self, populated_trace):
+        populated_trace.parent_trace = "parent-abc"
+        d = populated_trace.to_dict()
+        restored = TraceGraph.from_dict(d)
+        assert restored.parent_trace == "parent-abc"
