@@ -11,13 +11,14 @@ or Mermaid diagrams, or query them from the terminal with `hermes trace`.
   turns, API requests, tool calls, subagents, approvals, gateway dispatch,
   and result/output transformations.
 - **`/trace` slash command** — view the current session's trace as a text tree,
-  list active/saved traces, load past traces, or export to JSON/Mermaid.
+  list active/saved traces, load past traces, Gantt timeline, or export to JSON/Mermaid.
 - **`hermes trace` CLI** — query traces outside a session:
 
   ```
   hermes trace list              # table of saved traces
   hermes trace view <id>         # text tree
   hermes trace stats <id>        # aggregate statistics
+  hermes trace gantt <id>        # ASCII Gantt timeline
   hermes trace clean --keep 20   # rotate old traces
   ```
 
@@ -25,6 +26,14 @@ or Mermaid diagrams, or query them from the terminal with `hermes trace`.
   token counts, and success/error markers.
 - **Stats footer** — totals for turns, LLM calls, tool calls, errors, tokens,
   and slowest span by type.
+- **Gantt timeline** — ASCII bar chart showing span concurrency and
+  bottlenecks per turn (`/trace gantt`, `hermes trace gantt <id>`).
+- **Subagent linking** — child traces reference their parent session
+  (`parent_trace` field) for bidirectional navigation.
+- **Error resilience** — all 18 hooks wrapped in try/except; a single
+  broken callback never orphans spans or crashes the agent.
+- **Monotonic LLM numbering** — per-turn counter that never resets,
+  even after context compression.
 - **Three output formats**, auto-written to `~/.hermes/traces/` at session end:
   - **JSON** (`<session_id>.json`) — full machine-readable graph
   - **Mermaid** (`<session_id>.mmd`) — flowchart for embedding in docs/issues
@@ -119,6 +128,7 @@ Session
 /trace view <id>       # view a specific session
 /trace list            # list active traces
 /trace load <id>       # load and display a saved trace
+/trace gantt           # show ASCII Gantt timeline
 /trace export          # write JSON + Mermaid to ~/.hermes/traces/
 /trace mermaid         # output Mermaid flowchart
 /trace clear           # remove in-memory trace
@@ -130,6 +140,7 @@ Session
 hermes trace list                    # table of all saved traces
 hermes trace view 20260608_101004   # text tree (supports prefix matching)
 hermes trace stats 20260608_101004  # aggregate statistics
+hermes trace gantt 20260608_101004  # ASCII Gantt timeline
 hermes trace clean --keep 20        # keep the 20 most recent, delete the rest
 ```
 
@@ -174,6 +185,9 @@ Slowest tool: execute_code (300.0s)
 ```bash
 # Install dev dependencies
 pip install -e ".[dev]"
+
+# Run tests (46 tests, ~90% coverage on tracer.py)
+pytest tests/ -v
 
 # Lint
 ruff check hermes_trace/
