@@ -43,7 +43,17 @@ or Mermaid diagrams, or query them from the terminal with `hermes trace`.
 
 ## Installation
 
-### pip (recommended)
+### hermes plugins install (recommended)
+
+```bash
+hermes plugins install hlothaire/hermes-trace
+hermes plugins enable hermes-trace
+```
+
+This is the official Hermes plugin distribution mechanism — no pip, no PyPI,
+no additional tooling needed.
+
+### pip (alternative)
 
 ```bash
 pip install hermes-trace
@@ -53,13 +63,6 @@ Hermes auto-discovers the plugin via the `hermes_agent.plugins` entry point.
 Then enable it:
 
 ```bash
-hermes plugins enable hermes-trace
-```
-
-### From Git
-
-```bash
-hermes plugins install hlothaire/hermes-trace
 hermes plugins enable hermes-trace
 ```
 
