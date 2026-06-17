@@ -580,13 +580,24 @@ def _handle_trace_command(raw_args: str) -> str:
             return "No active trace."
         return trace.to_gantt()
 
+    if action == "html":
+        trace = get_current_trace()
+        if trace is None:
+            return "No active trace."
+        try:
+            path = trace.write_html()
+            return f"HTML trace written to {path}"
+        except Exception as exc:
+            return f"HTML export failed: {exc}"
+
     return (
-        "Usage: /trace [view|list|load <id>|export|mermaid|gantt|clear]\n"
+        "Usage: /trace [view|list|load <id>|export|mermaid|gantt|html|clear]\n"
         "  view     - Show current trace as text tree (default)\n"
         "  list     - List active/saved traces\n"
         "  load <id> - Load and display a saved trace\n"
         "  export   - Save current trace to ~/.hermes/traces/\n"
         "  mermaid  - Show trace as Mermaid flowchart\n"
         "  gantt    - Show ASCII Gantt timeline\n"
+        "  html     - Export interactive HTML timeline\n"
         "  clear    - Remove current trace from memory"
     )

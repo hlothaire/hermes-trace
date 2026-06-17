@@ -183,6 +183,10 @@ def _setup_argparse(subparser: argparse.ArgumentParser) -> None:
     gantt_p = subs.add_parser("gantt", help="Show ASCII Gantt timeline")
     gantt_p.add_argument("session_id", help="Session ID (can be a prefix)")
 
+    # html <session_id>
+    html_p = subs.add_parser("html", help="Export interactive HTML timeline")
+    html_p.add_argument("session_id", help="Session ID (can be a prefix)")
+
     subparser.set_defaults(func=_handle_command)
 
 
@@ -198,6 +202,8 @@ def _handle_command(args: argparse.Namespace) -> None:
         _stats_trace(args.session_id)
     elif cmd == "gantt":
         _gantt_trace(args.session_id)
+    elif cmd == "html":
+        _html_trace(args.session_id)
     elif cmd == "clean":
         _clean_traces(args.keep)
     else:
@@ -209,6 +215,7 @@ def _handle_command(args: argparse.Namespace) -> None:
         print("  view <session_id> Show text tree for a trace")
         print("  stats <session_id> Show aggregate statistics")
         print("  gantt <session_id> Show ASCII Gantt timeline")
+        print("  html <session_id>  Export interactive HTML timeline")
         print("  clean --keep N    Rotate old traces (default: keep 20)")
         sys.exit(1)
 
@@ -232,4 +239,27 @@ def _gantt_trace(session_id: str) -> None:
         print(trace.to_gantt())
     except Exception as exc:
         print(f"Failed to load trace: {exc}")
+        sys.exit(1)
+
+
+def _html_trace(session_id: str) -> None:
+    """Export a trace as an interactive HTML timeline."""
+    json_path = TRACE_DIR / f"{session_id}.json"
+    if not json_path.exists():
+        matches = sorted(TRACE_DIR.glob(f"{session_id}*.json"))
+        if not matches:
+            print(f"No trace found for session '{session_id}'.")
+            sys.exit(1)
+        if len(matches) > 1:
+            print(f"Ambiguous session ID. Candidates: {', '.join(m.stem for m in matches)}")
+            sys.exit(1)
+        json_path = matches[0]
+
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        trace = TraceGraph.from_dict(data)
+        path = trace.write_html()
+        print(f"HTML trace written to {path}")
+    except Exception as exc:
+        print(f"Failed to export HTML: {exc}")
         sys.exit(1)

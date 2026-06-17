@@ -647,6 +647,184 @@ class TraceGraph:
 
         return "\n".join(lines) if lines else "(no spans)"
 
+    def to_html(self) -> str:
+        """Generate a standalone HTML page with an interactive D3.js timeline.
+
+        Opens in any browser — no server needed.
+        Shows a zoomable Gantt chart with tooltips, colour-coded by span
+        type (LLM blue, tool green, error red), and a stats summary.
+        """
+        import html as _html
+
+        session_id = _html.escape(self.session_id)
+        model = _html.escape(self.model or "?")
+        platform = _html.escape(self.platform or "?")
+        duration = round(self.ended_at - self.started_at, 1) if self.ended_at else "?"
+        data_json = self.to_json()
+
+        return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hermes Trace — __SESSION__</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d1117; color:#c9d1d9; font:14px/1.5 system-ui,sans-serif; padding:24px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .meta { color:#8b949e; margin-bottom:20px; }
+  .stats { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:24px; }
+  .stat { background:#161b22; border-radius:6px; padding:10px 16px; }
+  .stat .label { font-size:11px; color:#8b949e; text-transform:uppercase; }
+  .stat .value { font-size:18px; font-weight:600; }
+  #chart { width:100%; overflow-x:auto; }
+  .bar { cursor:pointer; }
+  .tooltip {
+    position:absolute; background:#1c2128; border:1px solid #30363d;
+    border-radius:6px; padding:10px 14px; font-size:12px; pointer-events:none;
+    max-width:320px; z-index:100; box-shadow:0 4px 12px rgba(0,0,0,.4);
+  }
+  .tooltip .tt-name { font-weight:600; margin-bottom:4px; }
+  .tooltip .tt-row { display:flex; justify-content:space-between; gap:12px; }
+  .axis text { fill:#8b949e; font-size:11px; }
+  .axis line,.axis path { stroke:#30363d; }
+</style>
+</head>
+<body>
+<h1>Trace: __SESSION__</h1>
+<div class="meta">Model: __MODEL__ &nbsp;|&nbsp; Platform: __PLATFORM__ &nbsp;|&nbsp; Duration: __DURATION__s</div>
+<div class="stats" id="stats"></div>
+<div id="chart"></div>
+<div class="tooltip" id="tooltip" style="opacity:0"></div>
+<script>
+var DATA = __DATA__;
+
+(function() {
+  var turns = DATA.turns || [];
+  if (!turns.length) return;
+
+  // Build flat list of rows
+  var rows = [];
+  turns.forEach(function(turn, ti) {
+    rows.push({ type:'turn', label:'Turn ' + turn.index, start:turn.started_at, end:turn.ended_at, turn:ti, color:'#30363d' });
+    turn.spans.forEach(function(span) {
+      var isLLM = span.kind === 'llm_call';
+      var isErr = span.status === 'error';
+      var color = isLLM ? (isErr ? '#da3633' : '#58a6ff') : (isErr ? '#da3633' : '#3fb950');
+      var name = isLLM
+        ? 'LLM #' + (span.metadata.llm_index || span.metadata.api_call_count || '?')
+        : span.name;
+      var tokens = isLLM
+        ? (span.metadata.usage ? span.metadata.usage.input_tokens + '\u2192' + span.metadata.usage.output_tokens : '?')
+        : '';
+      rows.push({
+        type: isLLM ? 'llm' : 'tool',
+        label: name,
+        start: span.started_at,
+        end: span.ended_at,
+        duration_ms: span.duration_ms,
+        status: span.status,
+        color: color,
+        tokens: tokens,
+        turn: ti
+      });
+    });
+  });
+
+  // Stats
+  var llmCalls = 0, toolCalls = 0, errors = 0, totalIn = 0, totalOut = 0;
+  turns.forEach(function(t) { t.spans.forEach(function(s) {
+    if (s.kind === 'llm_call') { llmCalls++; var u = s.metadata.usage||{}; totalIn += u.input_tokens||0; totalOut += u.output_tokens||0; }
+    else toolCalls++;
+    if (s.status === 'error') errors++;
+  }); });
+  var stEl = document.getElementById('stats');
+  var fmt = function(n) { return n.toLocaleString(); };
+  [
+    {label:'Turns', value:turns.length},
+    {label:'LLM calls', value:llmCalls},
+    {label:'Tool calls', value:toolCalls},
+    {label:'Tokens in', value:fmt(totalIn)},
+    {label:'Tokens out', value:fmt(totalOut)},
+    {label:'Errors', value:errors, warn:errors>0}
+  ].forEach(function(s) {
+    var d = document.createElement('div'); d.className='stat';
+    d.innerHTML = '<div class="label">'+s.label+'</div><div class="value"'+(s.warn?' style="color:#da3633"':'')+'>'+s.value+'</div>';
+    stEl.appendChild(d);
+  });
+
+  // Chart dimensions
+  var margin = {top:10, right:20, bottom:30, left:130};
+  var rowH = 22;
+  var height = rows.length * rowH + margin.top + margin.bottom;
+  var width = Math.max(900, (document.getElementById('chart').clientWidth || 900) - margin.left - margin.right);
+
+  var tMin = d3.min(rows, function(d) { return d.start; });
+  var tMax = d3.max(rows, function(d) { return d.end; });
+  var totalDur = (tMax - tMin) || 1;
+
+  var svg = d3.select('#chart').append('svg')
+    .attr('width', width + margin.left + margin.right)
+    .attr('height', height);
+
+  var g = svg.append('g').attr('transform', 'translate('+margin.left+','+margin.top+')');
+
+  var x = d3.scaleLinear().domain([0, totalDur]).range([0, width]);
+  var xAxis = d3.axisBottom(x).ticks(10).tickFormat(function(d) { return (d/1000).toFixed(0)+'s'; });
+  g.append('g').attr('class','axis').attr('transform','translate(0,'+(rows.length*rowH)+')').call(xAxis);
+
+  // Row labels
+  g.selectAll('.label').data(rows).enter().append('text')
+    .attr('x', -6).attr('y', function(d,i) { return i*rowH+15; })
+    .attr('text-anchor','end')
+    .attr('fill', function(d) { return d.color; })
+    .attr('font-size','12px')
+    .text(function(d) { return d.label; });
+
+  // Bars
+  var tooltip = d3.select('#tooltip');
+  g.selectAll('.bar').data(rows.filter(function(d) { return d.type !== 'turn'; })).enter()
+    .append('rect').attr('class','bar')
+    .attr('x', function(d) { return x((d.start - tMin) * 1000); })
+    .attr('y', function(d) { return rows.indexOf(d) * rowH + 3; })
+    .attr('width', function(d) { return Math.max(2, x(d.duration_ms || ((d.end-d.start)*1000))); })
+    .attr('height', rowH - 4)
+    .attr('rx', 3)
+    .attr('fill', function(d) { return d.color; })
+    .attr('opacity', 0.85)
+    .on('mouseover', function(ev, d) {
+      tooltip.style('opacity', 1)
+        .html('<div class="tt-name" style="color:'+d.color+'">'+d.label+'</div>'
+          + '<div class="tt-row"><span>Duration</span><span>'+ (d.duration_ms/1000).toFixed(2) +'s</span></div>'
+          + '<div class="tt-row"><span>Status</span><span>'+d.status+'</span></div>'
+          + (d.tokens ? '<div class="tt-row"><span>Tokens</span><span>'+d.tokens+'</span></div>' : '')
+        )
+        .style('left', (ev.pageX+12)+'px').style('top', (ev.pageY-28)+'px');
+      d3.select(this).attr('opacity', 1);
+    })
+    .on('mousemove', function(ev) {
+      tooltip.style('left', (ev.pageX+12)+'px').style('top', (ev.pageY-28)+'px');
+    })
+    .on('mouseout', function() {
+      tooltip.style('opacity', 0);
+      d3.select(this).attr('opacity', 0.85);
+    });
+
+})();
+</script>
+</body>
+</html>""".replace("__SESSION__", session_id).replace("__MODEL__", model).replace("__PLATFORM__", platform).replace("__DURATION__", str(duration)).replace("__DATA__", data_json)
+
+    def write_html(self, path: Optional[Path] = None) -> Path:
+        """Write the trace as a standalone HTML file to disk."""
+        TRACE_DIR.mkdir(parents=True, exist_ok=True)
+        if path is None:
+            path = TRACE_DIR / f"{self.session_id}.html"
+        path.write_text(self.to_html(), encoding="utf-8")
+        logger.info("HTML trace written to %s", path)
+        return path
+
 
 # Thread-safe registry of active traces by session_id
 _traces: dict[str, TraceGraph] = {}
