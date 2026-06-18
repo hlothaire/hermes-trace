@@ -25,8 +25,6 @@ First public release.
   (`parent_trace` field) for bidirectional navigation.
 - **Three output formats** auto-written to `~/.hermes/traces/` at session end:
   JSON, Mermaid flowchart, text tree.
-- **`pip` distribution** via `hermes_agent.plugins` entry point.
-- **46 unit tests** with ~90% coverage on the core tracing engine.
 
 ### Fixed
 
