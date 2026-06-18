@@ -70,7 +70,7 @@ hermes plugins enable hermes-trace
 
 ```bash
 git clone https://github.com/hlothaire/hermes-trace
-ln -s "$PWD/hermes-trace" ~/.hermes/plugins/hermes-trace/
+ln -s "$PWD/hermes-trace/hermes_trace" ~/.hermes/plugins/hermes-trace/
 hermes plugins enable hermes-trace
 ```
 
